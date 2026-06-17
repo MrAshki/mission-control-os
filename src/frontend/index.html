@@ -1,0 +1,1246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Lexy — Intelligence Map</title>
+<style>
+  /* ---- palette: cosmic core (reference) reconciled with Mission Control ops semantics ---- */
+  :root{
+    --bg:#05070f;
+    --fg:#eaf0ff;
+    --fg2:#b6c1e0;
+    --muted:#7382ab;
+    --meta:#4a6080;
+    --panel:rgba(13,18,33,.52);
+    --panel-2:rgba(11,15,28,.66);
+    --hair:rgba(126,156,224,.16);
+    --hair-soft:rgba(126,156,224,.085);
+    --success:#26de81;
+    --warn:#fbbf24;
+    --danger:#ff4757;
+    --accent:#7cc7ff;                 /* overwritten per-state by JS */
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"SF Pro Display",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+
+    /* layout insets — JS reads these so canvas + chrome stay in sync */
+    --rail:266px; --ops:362px; --topb:66px; --dockb:98px;
+  }
+  @media (max-width:1180px){ :root{ --rail:214px; --ops:300px; --topb:60px; --dockb:90px; } }
+  @media (max-width:820px){
+    :root{ --rail:0px; --ops:0px; --topb:54px; --dockb:120px; }
+    .rail,.ops{ display:none !important; }
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:var(--sans); overflow:hidden;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  #core{position:fixed;inset:0;display:block;touch-action:none;cursor:grab;z-index:0}
+  #core.grabbing{cursor:grabbing}
+  #core.point{cursor:pointer}
+
+  /* atmosphere */
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:2;
+    background:radial-gradient(125% 100% at 50% 47%, transparent 50%, rgba(2,4,10,.5) 80%, rgba(1,2,6,.94) 100%);
+    mix-blend-mode:multiply;}
+  .grain{position:fixed;inset:0;pointer-events:none;z-index:3;opacity:.045;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+
+  /* ---- shared chrome ---- */
+  .hud{position:fixed;inset:0;z-index:5;pointer-events:none}
+  .hud > *{pointer-events:auto}
+  .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted)}
+
+  /* top masthead */
+  .topbar{position:fixed;top:0;left:0;right:0;height:var(--topb);z-index:6;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 clamp(16px,2.4vw,30px);
+    background:linear-gradient(180deg, rgba(5,7,15,.82), rgba(5,7,15,0));
+    pointer-events:none;}
+  .topbar > div{pointer-events:auto}
+  .mast{display:flex;align-items:center;gap:13px}
+  .logo{width:26px;height:26px;border-radius:6px;flex:none;display:grid;place-items:center;
+    background:radial-gradient(circle at 35% 30%, color-mix(in oklab,var(--accent),white 18%), var(--accent) 70%);
+    color:#05070f;font-weight:800;font-size:14px;
+    box-shadow:0 0 18px -2px var(--accent), inset 0 0 6px rgba(255,255,255,.4);}
+  .mast .ttl{font-weight:600;letter-spacing:.04em;font-size:14px;line-height:1.1}
+  .mast .ttl small{display:block;color:var(--muted);font-family:var(--mono);
+    font-size:10px;letter-spacing:.18em;text-transform:uppercase;margin-top:2px}
+  .mast .sep{width:1px;height:26px;background:var(--hair);margin:0 4px}
+  .mast .map{font-weight:300;font-size:14px;color:var(--fg2);letter-spacing:.02em}
+  .mast .map b{color:var(--fg);font-weight:600}
+
+  .status{display:flex;align-items:center;gap:clamp(12px,1.8vw,24px);
+    font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.1em}
+  .status .v{color:var(--fg)}
+  .status .live{display:flex;align-items:center;gap:7px;color:var(--success)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none;
+    box-shadow:0 0 9px 1px currentColor;animation:beat 2.4s ease-in-out infinite}
+  @keyframes beat{0%,100%{opacity:.5;transform:scale(.8)}50%{opacity:1;transform:scale(1.18)}}
+
+  /* generic panel = translucent hairline glass, no card shadow */
+  .panel{background:var(--panel);border:1px solid var(--hair);border-radius:4px;
+    backdrop-filter:blur(17px) saturate(1.35);-webkit-backdrop-filter:blur(17px) saturate(1.35);}
+  .phead{display:flex;align-items:center;justify-content:space-between;
+    padding:11px 14px 9px;border-bottom:1px solid var(--hair-soft)}
+  .phead h3{margin:0;font-family:var(--mono);font-size:10.5px;font-weight:600;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--fg2);display:flex;align-items:center;gap:8px}
+  .phead h3::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--accent);
+    box-shadow:0 0 8px 1px var(--accent)}
+  .phead .meta{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--meta);text-transform:uppercase}
+
+  /* ---- LEFT RAIL ---- */
+  .rail{position:fixed;top:var(--topb);left:0;bottom:var(--dockb);width:var(--rail);z-index:6;
+    display:flex;flex-direction:column;gap:2px;padding:14px 12px 12px;
+    background:linear-gradient(90deg, rgba(7,10,20,.74), rgba(7,10,20,.28));
+    border-right:1px solid var(--hair-soft);overflow:hidden}
+  .rail .grp{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--meta);padding:14px 10px 7px}
+  .nav{display:flex;flex-direction:column;gap:1px}
+  .nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:4px;
+    color:var(--muted);text-decoration:none;font-size:13px;font-weight:500;letter-spacing:.01em;
+    position:relative;transition:background .2s,color .2s}
+  .nav a svg{width:16px;height:16px;flex:none;stroke:currentColor;stroke-width:1.5;fill:none;
+    stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+  .nav a:hover{color:var(--fg2);background:rgba(126,156,224,.06)}
+  .nav a.on{color:#fff;background:rgba(126,156,224,.09)}
+  .nav a.on::before{content:"";position:absolute;left:-12px;top:7px;bottom:7px;width:2px;border-radius:2px;
+    background:var(--accent);box-shadow:0 0 10px 1px var(--accent)}
+  .nav a .kbd{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--meta);letter-spacing:.1em}
+
+  .agent{display:flex;align-items:center;gap:10px;padding:7px 11px;border-radius:4px}
+  .agent .ad{width:7px;height:7px;border-radius:50%;flex:none;box-shadow:0 0 8px 1px currentColor}
+  .agent .nm{font-size:12.5px;color:var(--fg2);font-weight:500}
+  .agent .rl{font-family:var(--mono);font-size:9.5px;color:var(--meta);letter-spacing:.08em;margin-top:1px}
+  .agent .st{margin-left:auto;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase}
+
+  .railfoot{margin-top:auto;display:flex;align-items:center;gap:10px;padding:11px 8px 2px;border-top:1px solid var(--hair-soft)}
+  .av{width:30px;height:30px;border-radius:7px;flex:none;display:grid;place-items:center;
+    background:var(--panel-2);border:1px solid var(--hair);font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700}
+  .railfoot .nm{font-size:12px;color:var(--fg2);font-weight:500}
+  .railfoot .rl{font-family:var(--mono);font-size:9.5px;color:var(--meta);letter-spacing:.08em;margin-top:1px}
+
+  /* ---- RIGHT OPS COLUMN ---- */
+  .ops{position:fixed;top:var(--topb);right:0;bottom:var(--dockb);width:var(--ops);z-index:6;
+    display:flex;flex-direction:column;gap:12px;padding:14px 14px 14px 6px;
+    overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(126,156,224,.22) transparent}
+  .ops::-webkit-scrollbar{width:7px}
+  .ops::-webkit-scrollbar-thumb{background:rgba(126,156,224,.2);border-radius:4px}
+
+  /* chat */
+  .chat .body{padding:12px 14px;display:flex;flex-direction:column;gap:9px;max-height:166px;overflow-y:auto;scrollbar-width:none}
+  .chat .body::-webkit-scrollbar{display:none}
+  .msg{font-size:12.5px;line-height:1.5;max-width:86%;padding:8px 11px;border-radius:9px}
+  .msg.lexy{align-self:flex-start;background:rgba(126,156,224,.09);color:var(--fg2);
+    border:1px solid var(--hair-soft);border-bottom-left-radius:2px}
+  .msg.me{align-self:flex-end;background:color-mix(in oklab,var(--accent),transparent 80%);
+    color:#eaf3ff;border:1px solid color-mix(in oklab,var(--accent),transparent 55%);border-bottom-right-radius:2px}
+  .msg .who{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--meta);margin-bottom:3px}
+  .composer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--hair-soft)}
+  .composer input{flex:1;min-width:0;background:rgba(5,8,16,.6);border:1px solid var(--hair);border-radius:7px;
+    color:var(--fg);font-family:var(--sans);font-size:12.5px;padding:9px 11px;outline:none;transition:border .2s,box-shadow .2s}
+  .composer input::placeholder{color:var(--meta)}
+  .composer input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab,var(--accent),transparent 80%)}
+  .composer button{flex:none;display:flex;align-items:center;gap:6px;border:0;cursor:pointer;
+    background:var(--accent);color:#05070f;font-family:var(--sans);font-weight:600;font-size:12px;
+    padding:0 13px;border-radius:7px;letter-spacing:.02em;transition:filter .2s,transform .08s;
+    box-shadow:0 0 16px -3px var(--accent)}
+  .composer button:hover{filter:brightness(1.08)}
+  .composer button:active{transform:translateY(1px)}
+
+  /* voice / push-to-talk */
+  .mic .micbody{display:flex;align-items:center;gap:15px;padding:14px}
+  .micwrap{position:relative;width:62px;height:62px;flex:none;display:grid;place-items:center}
+  .micring{position:absolute;width:62px;height:62px;border-radius:50%;border:1px solid var(--accent);opacity:0;pointer-events:none}
+  .micbtn{position:relative;z-index:1;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;cursor:pointer;
+    border:1px solid color-mix(in oklab,var(--accent),transparent 52%);color:var(--accent);
+    background:radial-gradient(circle at 50% 36%, color-mix(in oklab,var(--accent),transparent 80%), rgba(7,11,21,.72));
+    transition:color .25s,border-color .25s,background .25s,box-shadow .25s,transform .08s;-webkit-tap-highlight-color:transparent}
+  .micbtn svg{position:absolute;width:23px;height:23px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .micbtn .micslash{opacity:0;transition:opacity .2s}
+  .micbtn:hover{box-shadow:0 0 18px -5px var(--accent)}
+  .micbtn:active{transform:scale(.96)}
+  .micinfo{flex:1;min-width:0}
+  .miclabel{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--fg2);transition:color .3s}
+  .michelp{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;color:var(--meta);margin-top:4px}
+  .michelp kbd{font-family:var(--mono);font-size:9px;color:var(--fg2);background:rgba(126,156,224,.12);
+    border:1px solid var(--hair-soft);border-radius:3px;padding:0 4px;letter-spacing:.04em}
+  .micwave{display:block;width:100%;height:26px;margin-top:9px;opacity:.9}
+  .micmute{appearance:none;cursor:pointer;border:1px solid var(--hair);background:transparent;
+    font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--meta);
+    padding:3px 9px;border-radius:4px;transition:color .2s,border-color .2s}
+  .micmute:hover{color:var(--fg2)}
+
+  /* mic visual states */
+  .mic.is-listening .micbtn{color:#eaf3ff;border-color:var(--accent);
+    background:radial-gradient(circle at 50% 36%, color-mix(in oklab,var(--accent),transparent 52%), rgba(7,11,21,.6));
+    box-shadow:0 0 26px -3px var(--accent), inset 0 0 14px color-mix(in oklab,var(--accent),transparent 62%)}
+  .mic.is-listening .micring{animation:micpulse 1.7s ease-out infinite}
+  .mic.is-listening .micring.r2{animation-delay:.85s}
+  @keyframes micpulse{0%{opacity:.45;transform:scale(.86)}100%{opacity:0;transform:scale(1.55)}}
+  .mic.is-processing .micbtn{color:var(--accent);border-color:color-mix(in oklab,var(--accent),transparent 40%);
+    box-shadow:0 0 16px -5px var(--accent)}
+  .mic.is-processing .miclabel{color:var(--accent)}
+  .mic.is-muted .micbtn{color:var(--danger);border-color:color-mix(in oklab,var(--danger),transparent 55%);
+    background:radial-gradient(circle at 50% 36%, color-mix(in oklab,var(--danger),transparent 82%), rgba(7,11,21,.72));box-shadow:none}
+  .mic.is-muted .micbtn .micslash{opacity:1;color:var(--danger)}
+  .mic.is-muted .miclabel{color:var(--danger)}
+  .mic.is-muted .micmute{color:var(--danger);border-color:color-mix(in oklab,var(--danger),transparent 55%)}
+  @media (prefers-reduced-motion:reduce){ .mic.is-listening .micring{animation:none} }
+
+  /* approvals */
+  .appr{padding:6px 8px 10px;display:flex;flex-direction:column;gap:2px}
+  .areq{padding:10px 8px;border-radius:5px;transition:opacity .4s,transform .4s,background .3s}
+  .areq + .areq{border-top:1px solid var(--hair-soft)}
+  .areq .q{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--fg2)}
+  .areq .q code{font-family:var(--mono);font-size:11px;color:var(--accent);
+    background:rgba(126,156,224,.1);padding:1px 6px;border-radius:4px}
+  .areq .sub{font-family:var(--mono);font-size:9.5px;color:var(--meta);letter-spacing:.06em;margin:5px 0 9px 0}
+  .areq .acts{display:flex;gap:7px}
+  .btn{flex:1;border:1px solid var(--hair);background:transparent;color:var(--fg2);cursor:pointer;
+    font-family:var(--sans);font-size:11.5px;font-weight:600;letter-spacing:.03em;padding:7px 0;border-radius:6px;
+    transition:background .18s,color .18s,border-color .18s}
+  .btn.ok{border-color:color-mix(in oklab,var(--success),transparent 55%);color:var(--success)}
+  .btn.ok:hover{background:color-mix(in oklab,var(--success),transparent 84%)}
+  .btn.no:hover{background:color-mix(in oklab,var(--danger),transparent 84%);color:var(--danger);border-color:color-mix(in oklab,var(--danger),transparent 55%)}
+  .areq.resolved{opacity:.5}
+  .areq .verdict{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+
+  /* timeline */
+  .tl{padding:8px 14px 12px;display:flex;flex-direction:column}
+  .tl .ev{display:grid;grid-template-columns:14px 1fr auto;gap:9px;align-items:start;padding:8px 0;position:relative}
+  .tl .ev + .ev{border-top:1px solid var(--hair-soft)}
+  .tl .ev .gut{display:flex;justify-content:center;padding-top:3px}
+  .tl .ev .td{width:8px;height:8px;border-radius:50%;background:var(--meta);flex:none;box-shadow:0 0 7px 1px transparent}
+  .tl .ev.live .td{background:var(--accent);box-shadow:0 0 9px 1px var(--accent)}
+  .tl .ev.done .td{background:var(--success)}
+  .tl .ev .tx{font-size:12.5px;color:var(--fg2);line-height:1.35}
+  .tl .ev .tx small{display:block;font-family:var(--mono);font-size:9.5px;color:var(--meta);letter-spacing:.05em;margin-top:2px}
+  .tl .ev .tm{font-family:var(--mono);font-size:10px;color:var(--meta);letter-spacing:.06em;white-space:nowrap}
+
+  /* memory */
+  .mem{padding:6px 8px 10px}
+  .mrow{display:flex;align-items:center;gap:11px;padding:9px 8px;border-radius:5px;text-decoration:none;transition:background .18s}
+  .mrow:hover{background:rgba(126,156,224,.06)}
+  .mrow + .mrow{border-top:1px solid var(--hair-soft)}
+  .mrow .ic{width:28px;height:28px;border-radius:6px;flex:none;display:grid;place-items:center;
+    background:rgba(126,156,224,.08);border:1px solid var(--hair-soft);color:var(--accent)}
+  .mrow .ic svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none}
+  .mrow .nm{font-size:12.5px;color:var(--fg2);font-weight:500}
+  .mrow .mt{font-family:var(--mono);font-size:9.5px;color:var(--meta);letter-spacing:.05em;margin-top:2px}
+  .mrow .sz{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--meta)}
+
+  /* ---- BOTTOM DOCK ---- */
+  .dock{position:fixed;left:0;right:0;bottom:0;height:var(--dockb);z-index:6;
+    display:flex;align-items:center;gap:clamp(14px,2.4vw,34px);
+    padding:0 clamp(16px,2.4vw,30px);
+    background:linear-gradient(0deg, rgba(5,7,15,.86), rgba(5,7,15,0));
+    pointer-events:none}
+  .dock > *{pointer-events:auto}
+  .switcher{display:flex;gap:6px;padding:6px;border-radius:999px;
+    background:var(--panel-2);border:1px solid var(--hair);
+    backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);
+    max-width:62vw;overflow-x:auto;scrollbar-width:none}
+  .switcher::-webkit-scrollbar{display:none}
+  .chip{appearance:none;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;gap:8px;
+    white-space:nowrap;padding:8px 14px;border-radius:999px;color:var(--muted);
+    font-family:var(--sans);font-size:12.5px;font-weight:500;letter-spacing:.01em;transition:color .3s,background .3s}
+  .chip .d{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none;transition:box-shadow .3s}
+  .chip:hover{color:var(--fg2)}
+  .chip.on{color:#fff;background:rgba(255,255,255,.06)}
+  .chip.on .d{box-shadow:0 0 11px 2px currentColor}
+
+  .dock{left:var(--rail);right:var(--ops);height:auto;bottom:18px;justify-content:center;padding:0 18px;background:none;z-index:5}
+  .telemetry-panel{width:min(860px,calc(100vw - var(--rail) - var(--ops) - 36px));padding:10px 12px;
+    background:rgba(10,15,28,.62);border:1px solid var(--hair);border-radius:7px;
+    backdrop-filter:blur(18px) saturate(1.35);-webkit-backdrop-filter:blur(18px) saturate(1.35);
+    box-shadow:0 0 32px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035)}
+  .metrics{display:flex;flex-direction:column;gap:8px;width:100%}
+  .metric-row{display:flex;align-items:center;justify-content:center;gap:clamp(12px,1.45vw,22px);min-width:0;flex-wrap:wrap}
+  .metric{display:flex;flex-direction:column;gap:3px;min-width:0;max-width:150px}
+  .metric .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--meta);white-space:nowrap}
+  .metric .val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--fg);letter-spacing:.02em;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+  .metric .val.acc{color:var(--accent);transition:color .8s}
+  .metric .val small{font-size:9px;color:var(--meta);font-weight:400;margin-left:2px}
+  .metric .val.warn{color:var(--warn)}
+  .metric .val.danger{color:var(--danger)}
+  .cohwrap{display:flex;align-items:center;gap:8px}
+  .cohbar,.mini-bar{width:64px;height:4px;border-radius:2px;background:rgba(126,156,224,.18);overflow:hidden;display:block;margin-top:1px}
+  .cohbar i,.mini-bar i{display:block;height:100%;border-radius:2px;background:var(--accent);
+    box-shadow:0 0 8px var(--accent);transition:width .5s ease,background .8s}
+  .mini-bar i.warn{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+  .mini-bar i.danger{background:var(--danger);box-shadow:0 0 8px var(--danger)}
+  #spark{display:block}
+
+  .hint{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;z-index:7;
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:rgba(115,130,171,.5);text-align:center;transition:opacity 1.2s;pointer-events:none}
+  .hint.fade{opacity:0}
+
+  @media (max-width:820px){
+    .topbar .mast .map,.topbar .mast .sep{display:none}
+    .status .hide-s{display:none}
+    .dock{left:0;right:0;bottom:12px;padding:0 12px}
+    .telemetry-panel{width:100%;padding:9px 10px}
+    .metric-row{justify-content:space-between;gap:10px}
+    .metric .val{font-size:12px;max-width:126px}
+    .cohbar,.mini-bar{width:50px}
+  }
+  @media (prefers-reduced-motion:reduce){ .dot{animation:none} }
+</style>
+  <!-- Three.js r128 (Lexy Core brain renderer) — local copy -->
+  <script src="three.min.js"></script>
+</head>
+<body>
+  <canvas id="core"></canvas>
+  <div class="vignette"></div>
+  <div class="grain"></div>
+
+  <div class="hud">
+    <!-- masthead -->
+    <header class="topbar">
+      <div class="mast">
+        <div class="logo">L</div>
+        <div class="ttl">Lexy<small>Mission Control</small></div>
+        <div class="sep"></div>
+        <div class="map"><b>Intelligence Map</b> · real-time cognition &amp; orchestration</div>
+      </div>
+      <div class="status">
+        <span class="hide-s">core <span class="v" id="s-core">98.6%</span></span>
+        <span class="hide-s">load <span class="v" id="s-load">0.42</span></span>
+        <span class="live"><span class="dot"></span><span id="s-state-top">OPERATIONAL</span></span>
+      </div>
+    </header>
+
+    <!-- left system rail -->
+    <nav class="rail">
+      <div class="grp">Mission Control</div>
+      <div class="nav">
+        <a class="on" href="#" data-panel="overview"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>Overview<span class="kbd">⌘1</span></a>
+        <a href="#" data-panel="mission"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.3"/></svg>Mission</a>
+        <a href="#" data-panel="agents"><svg viewBox="0 0 16 16"><circle cx="5.5" cy="6" r="2.2"/><circle cx="11" cy="6.6" r="1.7"/><path d="M2 13.5c.3-2.2 2-3.2 3.5-3.2s3.2 1 3.5 3.2"/><path d="M9.6 13.5c.2-1.6 1.2-2.4 2.4-2.4s1.9.6 2.1 1.8"/></svg>Agents</a>
+        <a href="#" data-panel="vault"><svg viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.2"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>Vault</a>
+        <a href="#" data-panel="approvals"><svg viewBox="0 0 16 16"><path d="M8 2l5 2v3.6c0 3-2 5-5 6-3-1-5-3-5-6V4z"/><path d="M5.8 8l1.5 1.5L10.4 6"/></svg>Approvals<span class="kbd">2</span></a>
+        <a href="#" data-panel="tools"><svg viewBox="0 0 16 16"><path d="M10.5 2.4a2.8 2.8 0 0 0-2.4 4.2L2.5 12.2l1.3 1.3 5.6-5.6a2.8 2.8 0 0 0 4.2-2.4l-1.8 1.8-1.6-1.6z"/></svg>Tools</a>
+        <a href="#" data-panel="system"><svg viewBox="0 0 16 16"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg>System</a>
+      </div>
+
+      <div class="grp">Active Agents</div>
+      <div class="nav" style="gap:1px">
+        <div class="agent"><span class="ad" style="color:var(--success)"></span><div><div class="nm">Orchestrator</div><div class="rl">routing · planning</div></div><span class="st" style="color:var(--success)">online</span></div>
+        <div class="agent"><span class="ad" style="color:var(--warn)"></span><div><div class="nm">Vault · Accounting</div><div class="rl">reconciling ledger</div></div><span class="st" style="color:var(--warn)">busy</span></div>
+        <div class="agent"><span class="ad" style="color:var(--accent)"></span><div><div class="nm">Builder</div><div class="rl">prototype render</div></div><span class="st" style="color:var(--accent)">active</span></div>
+        <div class="agent"><span class="ad" style="color:var(--meta)"></span><div><div class="nm">Hermes · Voice</div><div class="rl">standby</div></div><span class="st" style="color:var(--meta)">idle</span></div>
+      </div>
+
+      <div class="railfoot">
+        <div class="av">MC</div>
+        <div><div class="nm">Mission Control OS</div><div class="rl">v2.4 · cosmic build</div></div>
+      </div>
+    </nav>
+
+    <!-- right operational stack -->
+    <aside class="ops">
+      <section class="panel chat" id="panel-chat" data-role="overview tools">
+        <div class="phead"><h3>Command / Chat</h3><span class="meta">Lexy · live</span></div>
+        <div class="body" id="chatBody">
+          <div class="msg lexy"><span class="who">Lexy</span>Core is nominal. Six agents in the mesh, ledger reconciling. What should I run?</div>
+          <div class="msg me"><span class="who">You</span>Draft the prototype review and queue a Telegram digest.</div>
+          <div class="msg lexy"><span class="who">Lexy</span>On it — pulling memory threads and routing to Builder. I'll surface approvals as they appear.</div>
+        </div>
+        <form class="composer" id="composer" autocomplete="off">
+          <input id="chatInput" type="text" placeholder="Ask Lexy to think, plan, or act…" aria-label="Message Lexy" />
+          <button type="submit"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8l11-5-4 11-2.3-4z"/></svg>Pulse</button>
+        </form>
+      </section>
+
+      <section class="panel mic is-idle" id="micPanel" data-role="tools system">
+        <div class="phead">
+          <h3>Voice</h3>
+          <button class="micmute" id="micMute" type="button" aria-pressed="false">Mute</button>
+        </div>
+        <div class="micbody">
+          <div class="micwrap">
+            <span class="micring r1"></span>
+            <span class="micring r2"></span>
+            <button class="micbtn" id="micBtn" type="button" aria-label="Push to talk — hold to speak">
+              <svg class="micicon" viewBox="0 0 24 24"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <svg class="micslash" viewBox="0 0 24 24"><path d="M3.5 3.5l17 17"/></svg>
+            </button>
+          </div>
+          <div class="micinfo">
+            <div class="miclabel" id="micLabel">Push to talk</div>
+            <div class="michelp" id="micHelp">Hold <kbd>Space</kbd> to speak</div>
+            <canvas class="micwave" id="micwave" width="300" height="26"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-approvals" data-role="approvals">
+        <div class="phead"><h3>Approval Queue</h3><span class="meta" id="apprCount">2 pending</span></div>
+        <div class="appr" id="apprList">
+          <div class="areq" data-id="shell">
+            <div class="q">Allow shell command <code>deploy --preview</code>?</div>
+            <div class="sub">requested by Builder · scope: sandbox</div>
+            <div class="acts"><button class="btn ok" data-act="ok">Approve</button><button class="btn no" data-act="no">Deny</button></div>
+          </div>
+          <div class="areq" data-id="tg">
+            <div class="q">Send weekly report to Telegram?</div>
+            <div class="sub">requested by Orchestrator · 1 channel</div>
+            <div class="acts"><button class="btn ok" data-act="ok">Approve</button><button class="btn no" data-act="no">Deny</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-mission" data-role="mission overview">
+        <div class="phead"><h3>Task Timeline</h3><span class="meta" id="tlClock">live</span></div>
+        <div class="tl" id="timeline">
+          <div class="ev done"><div class="gut"><span class="td"></span></div><div class="tx">Visual brief locked<small>orchestrator → builder</small></div><span class="tm">09:58</span></div>
+          <div class="ev live"><div class="gut"><span class="td"></span></div><div class="tx">Prototype review in progress<small>builder · render pass 3</small></div><span class="tm">10:21</span></div>
+          <div class="ev"><div class="gut"><span class="td"></span></div><div class="tx">Backend reconciliation<small>vault · accounting</small></div><span class="tm">10:40</span></div>
+          <div class="ev"><div class="gut"><span class="td"></span></div><div class="tx">Weekly channel digest<small>queued · telegram</small></div><span class="tm">11:00</span></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-vault" data-role="vault">
+        <div class="phead"><h3>Memory / Vault</h3><span class="meta">128 threads</span></div>
+        <div class="mem">
+          <a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l5 3-5 3-5-3z"/><path d="M3 8l5 3 5-3"/></svg></span><div><div class="nm">Hermes OS Orientation</div><div class="mt">context · pinned</div></div><span class="sz">42kb</span></a>
+          <a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="M3 6.5h10M6.5 6.5V13"/></svg></span><div><div class="nm">Mission Control Notes</div><div class="mt">updated 4m ago</div></div><span class="sz">7.1kb</span></a>
+          <a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h6l3 3v9H4z"/><path d="M6 8h5M6 11h5"/></svg></span><div><div class="nm">Agent Playbooks</div><div class="mt">14 routines</div></div><span class="sz">96kb</span></a>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-tools" data-role="tools">
+        <div class="phead"><h3>Tools / Services</h3><span class="meta" id="toolsMeta">probing</span></div>
+        <div class="mem" id="toolsList">
+          <a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.4a2.8 2.8 0 0 0-2.4 4.2L2.5 12.2l1.3 1.3 5.6-5.6a2.8 2.8 0 0 0 4.2-2.4l-1.8 1.8-1.6-1.6z"/></svg></span><div><div class="nm">Plugin API</div><div class="mt">loading</div></div><span class="sz">--</span></a>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-system" data-role="system">
+        <div class="phead"><h3>System / Health</h3><span class="meta" id="systemMeta">probing</span></div>
+        <div class="mem" id="systemList">
+          <a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg></span><div><div class="nm">Runtime</div><div class="mt">loading</div></div><span class="sz">--</span></a>
+        </div>
+      </section>
+    </aside>
+
+    <!-- bottom dock -->
+    <footer class="dock" aria-label="Lexy runtime and hardware telemetry">
+      <div class="telemetry-panel">
+        <div class="metrics">
+          <div class="metric-row runtime-row">
+            <div class="metric"><span class="k">Status</span><span class="val acc" id="m-state">Idle</span></div>
+            <div class="metric"><span class="k">Coherence</span><span class="cohwrap"><span class="val" id="m-coh">98.6%</span><span class="cohbar"><i id="m-cohbar" style="width:98%"></i></span></span></div>
+            <div class="metric"><span class="k">Throughput</span><span class="val" id="m-syn">312<small>ops/s</small></span></div>
+            <div class="metric"><span class="k">Synaptic flow</span><canvas id="spark" width="128" height="30"></canvas></div>
+            <div class="metric"><span class="k">Last sync</span><span class="val" id="m-clock">00:00:00</span></div>
+          </div>
+          <div class="metric-row hardware-row">
+            <div class="metric"><span class="k">GPU</span><span class="val" id="hw-gpu">Unavailable</span><span class="mini-bar"><i id="hw-gpu-bar" style="width:0%"></i></span></div>
+            <div class="metric"><span class="k">GPU Temp</span><span class="val" id="hw-gpu-temp">Unavailable</span></div>
+            <div class="metric"><span class="k">VRAM</span><span class="val" id="hw-vram">Unavailable</span><span class="mini-bar"><i id="hw-vram-bar" style="width:0%"></i></span></div>
+            <div class="metric"><span class="k">CPU</span><span class="val" id="hw-cpu">Unavailable</span><span class="mini-bar"><i id="hw-cpu-bar" style="width:0%"></i></span></div>
+            <div class="metric"><span class="k">RAM</span><span class="val" id="hw-ram">Unavailable</span><span class="mini-bar"><i id="hw-ram-bar" style="width:0%"></i></span></div>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <div class="hint" id="hint">drag to orbit · hover to excite neurons · click a node or hub to pull threads</div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+  /* ===== TEMP DIAGNOSTIC — paints any JS error onto the screen so we can see it ===== */
+  window.addEventListener("error", ev => {
+    let box = document.getElementById("__err");
+    if(!box){ box=document.createElement("pre"); box.id="__err";
+      box.style.cssText="position:fixed;left:300px;right:380px;top:80px;z-index:99999;background:#300;color:#ff8;padding:14px;font:12px/1.5 monospace;border:1px solid #f44;border-radius:6px;white-space:pre-wrap;max-height:60vh;overflow:auto;pointer-events:auto";
+      document.body.appendChild(box); }
+    box.textContent += "⚠ "+(ev.message||ev.error)+"\n   @ "+(ev.filename||"").split("/").pop()+":"+ev.lineno+":"+ev.colno+"\n"+((ev.error&&ev.error.stack)||"")+"\n\n";
+  });
+  console.log("THREE present at IIFE start:", typeof THREE);
+  const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  const $ = id => document.getElementById(id);
+  const API_PATH = "/api/plugins/hermes-os-mission-control";
+  function apiBase(){
+    if(window.__HERMES_MISSION_CONTROL_FETCH__) return API_PATH;
+    // Standalone mode: when this cockpit is served by scripts/mission_control_server.py,
+    // the same origin exposes /api. When opened from another static server, allow an
+    // explicit override via ?api=http://127.0.0.1:8080/api/plugins/hermes-os-mission-control.
+    try{
+      const override = new URLSearchParams(location.search).get("api");
+      if(override) return override.replace(/\/$/, "");
+    }catch(_){ }
+    return API_PATH;
+  }
+  const safeText = value => String(value == null || value === "" ? "unknown" : value);
+  const esc = value => safeText(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+  async function apiGet(path){
+    if(window.__HERMES_MISSION_CONTROL_FETCH__) return window.__HERMES_MISSION_CONTROL_FETCH__(apiBase() + path);
+    const res = await fetch(apiBase() + path, {headers:{"Accept":"application/json"}});
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return res.json();
+  }
+  async function apiPost(path, payload){
+    const options={method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(payload||{})};
+    if(window.__HERMES_MISSION_CONTROL_FETCH__) return window.__HERMES_MISSION_CONTROL_FETCH__(apiBase() + path, options);
+    const res = await fetch(apiBase() + path, options);
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return res.json();
+  }
+  async function apiPostRaw(path, blob){
+    const options={method:"POST",headers:{"Accept":"application/json"},body:blob};
+    if(window.__HERMES_MISSION_CONTROL_FETCH__) return window.__HERMES_MISSION_CONTROL_FETCH__(apiBase() + path, options);
+    const res = await fetch(apiBase() + path, options);
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return res.json();
+  }
+
+  /* ===== STATE ENGINE
+     hue = hot-core hue, hue2 = outer-tendril hue. speed=spin, fire=synapse
+     rate, jitter=organic wobble, breathe=core pulse, syn=baseline ops/s.    */
+  const STATES = [
+    {id:"idle",        name:"Idle",         tag:"Resting",        hue:286, hue2:206, speed:.028, fire:.55, jitter:.42, breathe:.85, syn:312,  coh:98.6,
+      desc:"Holding a calm baseline. Synapses idling, the lattice breathing slow."},
+    {id:"listening",   name:"Listening",    tag:"Awaiting input", hue:198, hue2:184, speed:.036, fire:.78, jitter:.5,  breathe:1.0,  syn:240,  coh:99.1,
+      desc:"Open and receptive. The cortical surface primed, waiting for a prompt."},
+    {id:"thinking",    name:"Thinking",     tag:"Processing",     hue:266, hue2:228, speed:.066, fire:1.7, jitter:.85, breathe:1.2,  syn:1248, coh:96.2,
+      desc:"Tracing connections across the web, weighing many paths at once."},
+    {id:"synthesizing",name:"Synthesizing", tag:"Generating",     hue:172, hue2:150, speed:.088, fire:2.2, jitter:.72, breathe:1.4,  syn:1670, coh:97.4,
+      desc:"Converging a thousand signals inward into one emergent answer."},
+    {id:"alert",       name:"Alert",        tag:"Anomaly",        hue:8,   hue2:34,  speed:.122, fire:2.7, jitter:1.6, breathe:1.55, syn:2090, coh:88.3,
+      desc:"An irregular pattern surfaced. Heightened scan across the core."},
+  ];
+
+  /* ===== THREE.JS LEXY CORE ===============================================
+     Replaces the Canvas-2D brain with a WebGL Three.js hemisphere brain.
+     Stubs (ripple, surge, CX, CY, MIN) keep the rest of the dashboard intact. */
+  const cssNum = n => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n))||0;
+  let CX=innerWidth/2, CY=innerHeight/2, MIN=Math.min(innerWidth,innerHeight);
+  let mx=-1e4, my=-1e4, lastInteract=performance.now(), autoIdx=0;
+  let worldOffsetX=0;
+
+  /* Stubs — called by setState(), chat handler, etc. */
+  function ripple(){ if(typeof _vw1!=="undefined"){ _vw1.r=0.0; _vw1.a=0.62; _vw1.active=true; } }
+  function surge(){ if(typeof _vnucPulse!=="undefined") _vnucPulse=Math.max(_vnucPulse,0.8); }
+
+  /* -- PRNG + MATH -- */
+  const _rng=(function(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};})(20240611);
+  const _rand=(a,b)=>a+(b-a)*_rng();
+  const _randInt=(a,b)=>Math.floor(_rand(a,b+1));
+  const _pick=arr=>arr[Math.floor(_rng()*arr.length)];
+  const _clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  const _lerp=(a,b,t)=>a+(b-a)*t;
+  function _hexRGB(h){h=h.replace('#','');return[parseInt(h.substr(0,2),16)/255,parseInt(h.substr(2,2),16)/255,parseInt(h.substr(4,2),16)/255];}
+  function _gyrus(x,y,z){return Math.sin(x*0.9+y*0.4)*0.55+Math.sin(y*1.15-z*0.6)*0.42+Math.sin(z*1.3+x*0.55)*0.32+Math.sin((x+y+z)*0.7)*0.22;}
+
+  const PAL={
+    leftBlue:["#087CFF","#159CFF","#36C7FF","#00D9FF","#38F0FF"].map(_hexRGB),
+    leftAlt:["#7A45FF","#633CFF"].map(_hexRGB),
+    rightVio:["#633CFF","#7A45FF","#945BFF","#159CFF","#36C7FF"].map(_hexRGB),
+    rightAlt:["#CC36FF","#EA3EFF"].map(_hexRGB),
+    core:["#EA3EFF","#FF4EDB","#CC36FF","#945BFF","#FFF5FF","#FFFFFF"].map(_hexRGB),
+    periph:["#159CFF","#36C7FF","#00D9FF","#7A45FF","#CC36FF"].map(_hexRGB),
+    tract:[_hexRGB("#7A45FF"),_hexRGB("#CC36FF"),_hexRGB("#FF4EDB"),_hexRGB("#38F0FF")]
+  };
+
+  /* -- RENDERER / SCENE -- */
+  const _cv=$("core");
+  const _renderer=new THREE.WebGLRenderer({canvas:_cv,antialias:true,alpha:true,powerPreference:"high-performance"});
+  _renderer.setClearColor(0x000000,0);
+  const _DPR=Math.min(window.devicePixelRatio||1,2);
+  const DPR=_DPR;
+  _renderer.setPixelRatio(_DPR);
+  const _scene=new THREE.Scene();
+  const _camera=new THREE.PerspectiveCamera(44,innerWidth/innerHeight,0.1,2000);
+  _camera.position.set(0,0,64);
+  const _world=new THREE.Group(); _scene.add(_world);
+  const _starWorld=new THREE.Group(); _scene.add(_starWorld);
+  const _NUC=new THREE.Vector3(0,-1.0,3.2);
+
+  /* -- BRAIN NODES (two hemispheres + cerebellum) -- */
+  const _HEMIX=8.6,_RX=18.5,_RY=14.0,_RZ=11.0;
+  const _nodes=[];
+  function _colorFor(region,distN){
+    if(distN<0.20)return _pick(PAL.core);
+    if(region<0)return _rng()<0.78?_pick(PAL.leftBlue):_pick(PAL.leftAlt);
+    if(region>0)return _rng()<0.74?_pick(PAL.rightVio):_pick(PAL.rightAlt);
+    return _pick(PAL.core);
+  }
+  function _makeNode(cls){
+    let region; const rv=_rng();
+    if(rv<0.46)region=-1; else if(rv<0.92)region=1; else region=0;
+    let cx=region*_HEMIX,rx=_RX,ry=_RY,rz=_RZ;
+    if(region===0){cx=0;rx=11;ry=7.5;rz=8.5;}
+    const u=_rng(),v=_rng(),ct=2*u-1,st=Math.sqrt(Math.max(0,1-ct*ct)),ph=2*Math.PI*v;
+    let dx=st*Math.cos(ph),dy=st*Math.sin(ph),dz=ct;
+    const tf=0.40+0.60*Math.pow(_rng(),0.7);
+    let px=cx+dx*rx*tf,py=dy*ry*tf,pz=dz*rz*tf;
+    if(region===0){py-=12.5;pz-=2.5;}
+    const g=_gyrus(px*0.13,py*0.13,pz*0.13),disp=g*1.85*tf;
+    px+=dx*disp; py+=dy*disp; pz+=dz*disp;
+    if(region!==0&&py>1.5) px+=region*Math.min((py-1.5)/_RY,1)*3.4;
+    if(py<0){py*=0.82;py-=0.5;}
+    pz+=Math.sin(px*0.18)*1.2;
+    const dist=Math.hypot(px-_NUC.x,py-_NUC.y,pz-_NUC.z);
+    _nodes.push({x:px,y:py,z:pz,region,cls,dist,col:_colorFor(region,0)});
+  }
+  for(let i=0;i<1750;i++) _makeNode("micro");
+  for(let i=0;i<150;i++) _makeNode("signal");
+  for(let i=0;i<26;i++) _makeNode("anchor");
+  let _MAXD=0; _nodes.forEach(n=>{if(n.dist>_MAXD)_MAXD=n.dist;}); _MAXD*=1.02;
+  _nodes.forEach(n=>{n.distN=n.dist/_MAXD; n.col=_colorFor(n.region,n.distN);});
+
+  const _periph=[];
+  for(let i=0;i<260;i++){
+    const ang=_rng()*Math.PI*2,rad=_rand(30,66);
+    _periph.push({x:Math.cos(ang)*rad*1.18,y:Math.sin(ang)*rad*0.78-2,z:_rand(-26,10),col:_pick(PAL.periph),dist:rad});
+  }
+
+  /* -- POINT GEOMETRY -- */
+  const _glowTex=(()=>{
+    const c=document.createElement("canvas"); c.width=c.height=64; const g=c.getContext("2d");
+    const gr=g.createRadialGradient(32,32,0,32,32,32);
+    gr.addColorStop(0,"rgba(255,255,255,1)"); gr.addColorStop(0.18,"rgba(255,255,255,0.85)");
+    gr.addColorStop(0.45,"rgba(255,255,255,0.30)"); gr.addColorStop(1,"rgba(255,255,255,0)");
+    g.fillStyle=gr; g.fillRect(0,0,64,64); return new THREE.CanvasTexture(c);
+  })();
+  const _VERT=`attribute vec3 aColor;attribute float aSize;attribute float aSeed;attribute float aDist;
+    uniform float uTime,uPixel,uScale,uEnergy,uTwinkle,uInward,uW1r,uW1a,uWWidth;
+    varying vec3 vColor;varying float vGlow;
+    void main(){
+      vec3 p=position*(1.0-uInward*0.07);
+      float tw=0.62+0.38*sin(uTime*(1.1+aSeed*0.7)+aSeed)*uTwinkle;
+      float w1=exp(-pow((aDist-uW1r)/uWWidth,2.0))*uW1a;
+      vGlow=(tw*uEnergy+w1);vColor=aColor;
+      vec4 mv=modelViewMatrix*vec4(p,1.0);
+      float sz=aSize*uScale*(1.0+w1*1.28)*(0.78+0.42*uEnergy);
+      gl_PointSize=sz*uPixel*(300.0/max(-mv.z,1.0));gl_Position=projectionMatrix*mv;}`;
+  const _FRAG=`uniform sampler2D uTex;varying vec3 vColor;varying float vGlow;
+    void main(){vec4 t=texture2D(uTex,gl_PointCoord);float a=t.a;if(a<0.01)discard;
+      gl_FragColor=vec4(vColor*vGlow*a+vColor*pow(t.a,3.0)*0.7,a);}`;
+  function _buildPts(list,bright,scale,defSize){
+    const n=list.length,pos=new Float32Array(n*3),col=new Float32Array(n*3),size=new Float32Array(n),seed=new Float32Array(n),dist=new Float32Array(n);
+    for(let i=0;i<n;i++){
+      const p=list[i]; pos[i*3]=p.x;pos[i*3+1]=p.y;pos[i*3+2]=p.z;
+      let b=bright*(p.cls==="anchor"?1.4:p.cls==="signal"?1.12:_rand(0.7,1.05));
+      const c=p.col; col[i*3]=c[0]*b;col[i*3+1]=c[1]*b;col[i*3+2]=c[2]*b;
+      size[i]=p.cls==="anchor"?_rand(4,7):p.cls==="signal"?_rand(2,4):p.cls==="micro"?_rand(0.7,1.8):defSize*_rand(0.6,1.3);
+      seed[i]=_rng()*6.2832; dist[i]=p.dist!==undefined?p.dist/_MAXD:0.5;
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+    geo.setAttribute("aColor",new THREE.BufferAttribute(col,3));
+    geo.setAttribute("aSize",new THREE.BufferAttribute(size,1));
+    geo.setAttribute("aSeed",new THREE.BufferAttribute(seed,1));
+    geo.setAttribute("aDist",new THREE.BufferAttribute(dist,1));
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{uTime:{value:0},uPixel:{value:_DPR},uScale:{value:scale},uEnergy:{value:1},uTwinkle:{value:1},
+                uInward:{value:0},uTex:{value:_glowTex},uW1r:{value:-1},uW1a:{value:0},uWWidth:{value:0.06}},
+      vertexShader:_VERT,fragmentShader:_FRAG,
+      transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
+    const pts=new THREE.Points(geo,mat); pts.frustumCulled=false; return pts;
+  }
+  const _brainPts=_buildPts(_nodes,1.0,1.0,1.4); _brainPts.renderOrder=4; _world.add(_brainPts);
+  const _periphPts=_buildPts(_periph.map(p=>({...p,cls:"micro"})),0.55,0.8,1.0); _periphPts.renderOrder=3; _world.add(_periphPts);
+
+  /* -- CONNECTIONS -- */
+  const _CELL=6.0,_grid=new Map();
+  _nodes.forEach((n,i)=>{const k=Math.floor(n.x/_CELL)+"_"+Math.floor(n.y/_CELL)+"_"+Math.floor(n.z/_CELL);(_grid.get(k)||_grid.set(k,[]).get(k)).push(i);});
+  function _nbr(i){const n=_nodes[i],out=[],cx=Math.floor(n.x/_CELL),cy=Math.floor(n.y/_CELL),cz=Math.floor(n.z/_CELL);
+    for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(let c=-1;c<=1;c++){const arr=_grid.get((cx+a)+"_"+(cy+b)+"_"+(cz+c));if(arr)for(const j of arr)if(j!==i)out.push(j);}return out;}
+  function _LB(){return{pos:[],col:[],u:[],seed:[],dist:[]};}
+  function _seg(buf,A,B,sd){
+    buf.pos.push(A.x,A.y,A.z,B.x,B.y,B.z);buf.col.push(A.r,A.g,A.b,B.r,B.g,B.b);
+    buf.u.push(A.u,B.u);buf.seed.push(sd,sd);
+    buf.dist.push(Math.hypot(A.x-_NUC.x,A.y-_NUC.y,A.z-_NUC.z)/_MAXD,Math.hypot(B.x-_NUC.x,B.y-_NUC.y,B.z-_NUC.z)/_MAXD);}
+  function _curve(buf,a,b,ctrl,segs,ca,cb,sd){
+    let prev=null;
+    for(let s=0;s<=segs;s++){const t=s/segs,it=1-t,x=it*it*a.x+2*it*t*ctrl.x+t*t*b.x,y=it*it*a.y+2*it*t*ctrl.y+t*t*b.y,z=it*it*a.z+2*it*t*ctrl.z+t*t*b.z;
+      const cur2={x,y,z,r:ca[0]*it+cb[0]*t,g:ca[1]*it+cb[1]*t,b:ca[2]*it+cb[2]*t,u:t};
+      if(prev)_seg(buf,prev,cur2,sd);prev=cur2;}}
+  function _ctrl(a,b,bulge){const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,mz=(a.z+b.z)/2,dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z;
+    let px=dy*0.3-dz*0.8,py=dz*0.45-dx*0.3,pz=dx*0.8-dy*0.45,pl=Math.hypot(px,py,pz)||1;
+    return{x:mx+px/pl*bulge,y:my+py/pl*bulge,z:mz+pz/pl*bulge};}
+  const _lBuf=_LB(),_eset=new Set();let _lc=0;
+  for(const i of [..._nodes.keys()].sort((a,b)=>_nodes[a].dist-_nodes[b].dist)){
+    if(_lc>1550)break;
+    const n=_nodes[i],cand=_nbr(i).map(j=>({j,d:Math.hypot(_nodes[j].x-n.x,_nodes[j].y-n.y,_nodes[j].z-n.z)})).filter(o=>o.d<8.5).sort((p,q)=>p.d-q.d);
+    let made=0;
+    for(const o of cand){if(made>=_randInt(2,4))break;const key=i<o.j?i+"-"+o.j:o.j+"-"+i;if(_eset.has(key))continue;_eset.add(key);
+      const a=_nodes[i],b=_nodes[o.j],bl=_rng()<0.82,bg=bl?o.d*_rand(0.12,0.32)*(_rng()<0.5?1:-1):0.0001;
+      _curve(_lBuf,a,b,_ctrl(a,b,bg),5,[a.col[0]*0.55,a.col[1]*0.55,a.col[2]*0.55],[b.col[0]*0.55,b.col[1]*0.55,b.col[2]*0.55],_rng());made++;_lc++;}}
+  const _big=_nodes.filter(n=>n.cls!=="micro");
+  for(let r=0;r<160;r++){const a=_pick(_big),b=_pick(_big),d=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);if(d<10||d>34)continue;
+    _curve(_lBuf,a,b,_ctrl(a,b,d*_rand(0.18,0.34)*(_rng()<0.5?1:-1)),10,[a.col[0]*0.8,a.col[1]*0.8,a.col[2]*0.8],[b.col[0]*0.8,b.col[1]*0.8,b.col[2]*0.8],_rng());}
+  const _tBuf=_LB(),_lB=_big.filter(n=>n.region<0),_rB=_big.filter(n=>n.region>0);
+  for(let t=0;t<34;t++){const a=_pick(_lB),b=_pick(_rB),via={x:_NUC.x+_rand(-3,3),y:_NUC.y+_rand(-2,4),z:_NUC.z+_rand(-2,5)},cc=_pick(PAL.tract);
+    _curve(_tBuf,a,via,_ctrl(a,via,Math.hypot(a.x-via.x,a.y-via.y)*0.3*(_rng()<0.5?1:-1)),12,[a.col[0],a.col[1],a.col[2]],cc,_rng());
+    _curve(_tBuf,via,b,_ctrl(via,b,Math.hypot(b.x-via.x,b.y-via.y)*0.3*(_rng()<0.5?1:-1)),12,cc,[b.col[0],b.col[1],b.col[2]],_rng());}
+  const _LVERT=`attribute vec3 aColor;attribute float aU;attribute float aSeed;attribute float aDist;uniform float uInward;
+    varying vec3 vColor;varying float vU;varying float vSeed;varying float vDist;
+    void main(){vColor=aColor;vU=aU;vSeed=aSeed;vDist=aDist;gl_Position=projectionMatrix*modelViewMatrix*vec4(position*(1.0-uInward*0.07),1.0);}`;
+  const _LFRAG=`uniform float uTime,uBase,uFlow,uEnergy,uExtra,uW1r,uW1a,uWWidth;varying vec3 vColor;varying float vU;varying float vSeed;varying float vDist;
+    void main(){float pos=fract(uTime*uFlow*0.16+vSeed),d=abs(fract(vU-pos+0.5)-0.5),packet=smoothstep(0.05,0.0,d)*(0.6+uFlow);
+      float w1=exp(-pow((vDist-uW1r)/uWWidth,2.0))*uW1a;
+      gl_FragColor=vec4(vColor*((uBase+uExtra)*(0.6+0.6*uEnergy)+packet*0.7+w1*0.62),1.0);}`;
+  function _buildLines(buf,base,extra){
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute("position",new THREE.BufferAttribute(new Float32Array(buf.pos),3));
+    geo.setAttribute("aColor",new THREE.BufferAttribute(new Float32Array(buf.col),3));
+    geo.setAttribute("aU",new THREE.BufferAttribute(new Float32Array(buf.u),1));
+    geo.setAttribute("aSeed",new THREE.BufferAttribute(new Float32Array(buf.seed),1));
+    geo.setAttribute("aDist",new THREE.BufferAttribute(new Float32Array(buf.dist),1));
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{uTime:{value:0},uBase:{value:base},uFlow:{value:0.5},uEnergy:{value:1},uExtra:{value:extra||0},
+                uInward:{value:0},uW1r:{value:-1},uW1a:{value:0},uWWidth:{value:0.06}},
+      vertexShader:_LVERT,fragmentShader:_LFRAG,
+      transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
+    const ls=new THREE.LineSegments(geo,mat);ls.frustumCulled=false;return ls;}
+  const _localLines=_buildLines(_lBuf,0.085,0); _localLines.renderOrder=2; _world.add(_localLines);
+  const _tractLines=_buildLines(_tBuf,0.10,0); _tractLines.renderOrder=3; _world.add(_tractLines);
+
+  /* -- NUCLEUS -- */
+  const _nuc=new THREE.Group(); _nuc.position.copy(_NUC); _world.add(_nuc); _nuc.renderOrder=6;
+  function _sprite(stops,sz){
+    const c=document.createElement("canvas");c.width=c.height=128;const g=c.getContext("2d");
+    const gr=g.createRadialGradient(64,64,0,64,64,64);
+    stops.forEach(s=>gr.addColorStop(s[0],s[1]));g.fillStyle=gr;g.fillRect(0,0,128,128);
+    const m=new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending});
+    const sp=new THREE.Sprite(m);sp.scale.set(sz,sz,1);return sp;}
+  const _corona=_sprite([[0,"rgba(165,105,220,0.24)"],[0.4,"rgba(125,62,195,0.11)"],[0.72,"rgba(78,38,148,0.04)"],[1,"rgba(50,25,110,0)"]],26);_nuc.add(_corona);
+  const _disc=new THREE.Mesh(new THREE.CircleGeometry(3.25,48),new THREE.MeshBasicMaterial({color:0x040210,transparent:true,opacity:0.97,depthWrite:false}));
+  _disc.position.z=0.02;_nuc.add(_disc);
+  const _coreGlow=_sprite([[0,"rgba(150,95,215,0.5)"],[0.4,"rgba(95,50,180,0.18)"],[1,"rgba(70,35,140,0)"]],3.4);
+  _coreGlow.position.z=0.05;_nuc.add(_coreGlow);
+  const _rim=new THREE.Mesh(new THREE.RingGeometry(3.25,3.42,72),new THREE.MeshBasicMaterial({color:0x9a6bff,transparent:true,opacity:0.42,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+  _rim.position.z=0.06;_nuc.add(_rim);
+
+  /* -- STARS (dim field, transparent canvas so dashboard CSS shows through) -- */
+  function _starLayer(count,sz,bright,spread){
+    const pos=new Float32Array(count*3),col=new Float32Array(count*3),ps=new Float32Array(count),sd=new Float32Array(count);
+    for(let i=0;i<count;i++){const a=_rng()*Math.PI*2,b=Math.acos(2*_rng()-1),r=spread*(0.6+0.4*_rng());
+      pos[i*3]=Math.sin(b)*Math.cos(a)*r;pos[i*3+1]=Math.sin(b)*Math.sin(a)*r*0.7;pos[i*3+2]=Math.cos(b)*r*0.5-90;
+      const tint=_rng(),c=tint<0.3?[0.7,0.82,1]:tint<0.5?[0.85,0.75,1]:[1,1,1];
+      col[i*3]=c[0]*bright;col[i*3+1]=c[1]*bright;col[i*3+2]=c[2]*bright;ps[i]=sz*_rand(0.5,1.5);sd[i]=_rng()*6.28;}
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+    geo.setAttribute("aColor",new THREE.BufferAttribute(col,3));
+    geo.setAttribute("aSize",new THREE.BufferAttribute(ps,1));
+    geo.setAttribute("aSeed",new THREE.BufferAttribute(sd,1));
+    geo.setAttribute("aDist",new THREE.BufferAttribute(new Float32Array(count),1));
+    const mat=new THREE.ShaderMaterial({
+      uniforms:{uTime:{value:0},uPixel:{value:_DPR},uScale:{value:1},uEnergy:{value:0.6},uTwinkle:{value:1},
+                uInward:{value:0},uTex:{value:_glowTex},uW1r:{value:-1},uW1a:{value:0},uWWidth:{value:0.12}},
+      vertexShader:_VERT,fragmentShader:_FRAG,transparent:true,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending});
+    const p=new THREE.Points(geo,mat);p.frustumCulled=false;return p;}
+  const _stars1=_starLayer(1600,1.0,0.28,300);_starWorld.add(_stars1);
+  const _stars2=_starLayer(180,2.2,0.60,260);_starWorld.add(_stars2);
+
+  /* -- VISUAL STATES (mapped from dashboard STATES array) -- */
+  const VSTATES={
+    idle:     {energy:0.52,flow:0.30,bloom:0.82,inward:0.00,tract:0.30,drift:0.045},
+    listening:{energy:0.50,flow:0.26,bloom:0.75,inward:0.55,tract:0.42,drift:0.000},
+    thinking: {energy:0.86,flow:0.62,bloom:0.98,inward:0.10,tract:1.15,drift:0.060},
+    working:  {energy:0.95,flow:0.88,bloom:0.92,inward:0.00,tract:0.70,drift:0.070},
+    insight:  {energy:1.15,flow:1.00,bloom:1.35,inward:-0.04,tract:1.20,drift:0.070}
+  };
+  const _D2V=["idle","listening","thinking","working","insight"];
+  let _vSt="idle",_vTgt=Object.assign({},VSTATES.idle),_vCur=Object.assign({},VSTATES.idle);
+  let _orbX=0,_orbY=0,_orbVX=0,_orbVY=0,_drag=false,_dwnX=0,_dwnY=0;
+  let _zoomZ=64,_zoomT=64;
+  let _vw1={r:-1,a:0,active:false},_vnucPulse=0;
+
+  /* -- POINTER INTERACTION -- */
+  _cv.addEventListener("pointerdown",e=>{_drag=true;_dwnX=e.clientX;_dwnY=e.clientY;lastInteract=performance.now();});
+  window.addEventListener("pointermove",e=>{
+    mx=e.clientX;my=e.clientY;
+    if(_drag){_orbVY+=(e.clientX-_dwnX)*0.004;_orbVX+=(e.clientY-_dwnY)*0.004;_orbY+=_orbVY;_orbX+=_orbVX;_dwnX=e.clientX;_dwnY=e.clientY;lastInteract=performance.now();}
+  });
+  window.addEventListener("pointerup",e=>{_drag=false;if(Math.hypot(e.clientX-_dwnX,e.clientY-_dwnY)<8){_vw1.r=0;_vw1.a=0.62;_vw1.active=true;_vnucPulse=Math.max(_vnucPulse,1);}});
+  window.addEventListener("wheel",e=>{e.preventDefault();_zoomT=_clamp(_zoomT+e.deltaY*0.025,44,90);},{passive:false});
+
+  /* -- RESIZE -- */
+  function _resizeCore(){
+    const W=innerWidth,H=innerHeight;
+    const il=cssNum("--rail")||266,ir=cssNum("--ops")||362,it=cssNum("--topb")||66,ib=cssNum("--dockb")||98;
+    const bw=W-il-ir,bh=H-it-ib;
+    CX=il+bw/2;CY=it+bh/2;MIN=Math.max(260,Math.min(bw,bh));
+    _camera.aspect=W/H;_camera.updateProjectionMatrix();
+    _renderer.setSize(W,H);
+    const pxOff=(il+bw/2)-(W/2);
+    worldOffsetX=(pxOff/(W/2))*Math.tan((44/2)*Math.PI/180)*64;
+  }
+  addEventListener("resize",_resizeCore);_resizeCore();
+
+  /* -- ANIMATE LOOP -- */
+  const _allPtMats=[_brainPts.material,_periphPts.material,_stars1.material,_stars2.material];
+  const _allLnMats=[_localLines.material,_tractLines.material];
+  const _vClk=new THREE.Clock();
+
+  function _animate(){
+    requestAnimationFrame(_animate);
+    const dt=Math.min(_vClk.getDelta(),0.05),t=_vClk.elapsedTime,now=performance.now();
+
+    /* Bridge dashboard state → visual state */
+    const di=STATES.indexOf(target),vs=_D2V[Math.max(0,Math.min(4,di<0?0:di))];
+    if(vs!==_vSt){_vSt=vs;_vTgt=Object.assign({},VSTATES[vs]||VSTATES.idle);}
+
+    /* Lerp dashboard cur (keeps CSS --accent animated) */
+    const k=1-Math.pow(0.0025,dt);
+    cur.hue=((cur.hue+(((target.hue-cur.hue+540)%360)-180)*k)%360+360)%360;
+    cur.hue2=((cur.hue2+(((target.hue2-cur.hue2+540)%360)-180)*k)%360+360)%360;
+    cur.speed=lerp(cur.speed,target.speed,k);cur.fire=lerp(cur.fire,target.fire,k);
+    cur.jitter=lerp(cur.jitter,target.jitter,k);cur.breathe=lerp(cur.breathe,target.breathe,k);
+    document.documentElement.style.setProperty("--accent","hsl("+cur.hue2+",92%,68%)");
+
+    /* Auto-cycle dashboard states after inactivity */
+    if(now-lastInteract>16000){autoIdx=(autoIdx+1)%STATES.length;setState(autoIdx,false);lastInteract=now-2000;}
+
+    /* Bridge pulseEnv → nucleus */
+    if(pulseEnv>0.4)_vnucPulse=Math.max(_vnucPulse,pulseEnv*0.7);
+
+    /* Lerp visual params */
+    const sm=1-Math.pow(0.001,dt);
+    for(const key of ["energy","flow","bloom","inward","tract","drift"])_vCur[key]=_lerp(_vCur[key],_vTgt[key],sm);
+
+    /* Wave pulse */
+    if(_vw1.active){_vw1.r+=dt*1.1;_vw1.a*=Math.pow(0.5,dt*1.95);if(_vw1.r>1.5){_vw1.active=false;_vw1.a=0;_vw1.r=-1;}}
+
+    const breath=Math.sin(t*0.8)*0.5+0.5;
+
+    /* Update point materials */
+    for(const mat of _allPtMats){const u=mat.uniforms;u.uTime.value=t;u.uEnergy.value=_vCur.energy;u.uTwinkle.value=1;u.uInward.value=_vCur.inward+(_vSt==="listening"?breath*0.05:0);u.uW1r.value=_vw1.r;u.uW1a.value=_vw1.a;}
+    _stars1.material.uniforms.uInward.value=0;_stars2.material.uniforms.uInward.value=0;
+    _stars1.material.uniforms.uEnergy.value=0.45;_stars2.material.uniforms.uEnergy.value=0.65;
+
+    /* Update line materials */
+    for(const mat of _allLnMats){const u=mat.uniforms;u.uTime.value=t;u.uEnergy.value=_vCur.energy;u.uFlow.value=_vCur.flow;u.uInward.value=_vCur.inward+(_vSt==="listening"?breath*0.05:0);u.uW1r.value=_vw1.r;u.uW1a.value=_vw1.a;}
+    _tractLines.material.uniforms.uExtra.value=_vCur.tract*0.16;
+    _tractLines.material.uniforms.uBase.value=0.10+_vCur.tract*0.10;
+
+    /* Nucleus */
+    const np=1+breath*0.05+_vnucPulse*0.18;
+    _corona.scale.setScalar(26*np*(0.9+0.2*_vCur.energy));
+    _coreGlow.scale.setScalar(11*np);
+    _rim.material.opacity=0.34+breath*0.10+_vnucPulse*0.14;
+    _coreGlow.material.opacity=_clamp(0.40+_vnucPulse*0.32+(_vSt==="insight"?0.35:0),0,0.85);
+    _vnucPulse=Math.max(0,_vnucPulse-dt*1.6);
+
+    /* Orbit */
+    _orbVX*=0.92;_orbVY*=0.92;
+    if(_vSt==="listening"&&!_drag){const rc=1-Math.pow(0.04,dt);_orbX=_lerp(_orbX,0,rc);_orbY=_lerp(_orbY,0,rc);}
+    _world.position.x=worldOffsetX;
+    _world.rotation.y=_orbY+t*_vCur.drift*0.12;
+    _world.rotation.x=_clamp(_orbX,-0.6,0.6);
+    _starWorld.rotation.y=_orbY*0.25+t*0.005;_starWorld.rotation.x=_orbX*0.25;
+    _zoomZ=_lerp(_zoomZ,_zoomT,1-Math.pow(0.006,dt));
+    _camera.position.set(0,0,_zoomZ);_camera.lookAt(worldOffsetX,-1,0);
+
+    _world.updateMatrixWorld();
+    _renderer.render(_scene,_camera);
+  }
+  /* Defer the first frame until the whole IIFE has run, so `target`, `cur`,
+     `lerp`, `setState`, `pulseEnv` (declared below) are initialized first. */
+  requestAnimationFrame(_animate);
+
+  /* ===== STATE TRANSITIONS (smoothed) ===================================== */
+  let target=STATES[0];
+  const cur={hue:target.hue,hue2:target.hue2,speed:target.speed,fire:target.fire,jitter:target.jitter,breathe:target.breathe};
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const lerpAng=(a,b,t)=>{ let d=((b-a+540)%360)-180; return a+d*t; };
+
+  function setState(idx,user){
+    target=STATES[idx];
+    document.querySelectorAll(".chip").forEach((c,k)=>c.classList.toggle("on",k===idx));
+    $("m-state").textContent=target.name;
+    $("s-state-top").textContent=target.tag.toUpperCase();
+    ripple(CX,CY,target.hue2,MIN*0.9,MIN*0.5); pulseEnv=Math.max(pulseEnv,0.9); surge(6);
+    if(user) lastInteract=performance.now();
+    autoIdx=idx;
+  }
+  /* state switcher removed — the bottom dock's Status metric now reflects the active state.
+     States still change via chat, approvals, the 1–5 keys, and ambient auto-cycling. */
+
+  /* ===== CHAT + APPROVALS drive the core ================================== */
+  let chatBusy=false;
+  const STATE_TO_INDEX={idle:0,listening:1,thinking:2,working:3,speaking:3,approval_waiting:4,error:4};
+  function setOperationalState(name,user){
+    const idx=STATE_TO_INDEX[name] == null ? 0 : STATE_TO_INDEX[name];
+    setState(idx,!!user);
+    if(name){ $("m-state").textContent=name.split("_").map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" "); $("s-state-top").textContent=name.toUpperCase(); }
+  }
+  function addMsg(text,who,id){
+    const b=$("chatBody"); if(id && b.querySelector('[data-mid="'+CSS.escape(String(id))+'"]')) return;
+    const d=document.createElement("div");
+    d.className="msg "+(who==="me"?"me":"lexy"); if(id) d.dataset.mid=String(id);
+    d.innerHTML='<span class="who">'+(who==="me"?"You":"Lexy")+'</span>'+esc(text);
+    b.appendChild(d); b.scrollTop=b.scrollHeight;
+  }
+  function renderConversation(messages){
+    const b=$("chatBody"); if(!b) return;
+    if(!messages || !messages.length){
+      b.innerHTML='<div class="msg lexy"><span class="who">Lexy</span>Mission Control chat is connected to Hermes native sessions. Send a message to begin.</div>';
+      return;
+    }
+    b.innerHTML="";
+    messages.forEach(m=>addMsg(m.content, m.role==="user"?"me":"lexy", m.id));
+  }
+  async function loadConversation(){
+    try{ const data=await apiGet("/conversation"); if(data.ok) renderConversation(data.messages||[]); if(data.state) setOperationalState(data.state,false); return data; }
+    catch(err){ addMsg("Conversation load failed: "+safeText(err.message||err),"lexy"); setOperationalState("error",false); return null; }
+  }
+  function setChatBusy(on){
+    chatBusy=!!on;
+    const inp=$("chatInput"), btn=document.querySelector("#composer button");
+    if(inp) inp.disabled=chatBusy;
+    if(btn){ btn.disabled=chatBusy; btn.dataset.label=btn.dataset.label||btn.textContent; btn.textContent=chatBusy?"Thinking…":btn.dataset.label; }
+  }
+  $("composer").addEventListener("submit",async e=>{
+    e.preventDefault(); if(chatBusy) return;
+    const inp=$("chatInput"); const v=inp.value.trim(); if(!v)return;
+    addMsg(v,"me","pending-"+Date.now()); inp.value=""; setChatBusy(true);
+    setOperationalState("thinking",true); surge(8); ripple(CX,CY,cur.hue,MIN*0.8,MIN*0.5);
+    try{
+      const result=await apiPost("/talk",{message:v});
+      if(result.state) setOperationalState(result.state,true);
+      if(result.ok){ if(result.conversation) renderConversation(result.conversation); else addMsg(result.reply||result.response||"[empty response]","lexy"); pushTimeline("Hermes response returned","native session · "+safeText(result.session_id||"unknown"),"done"); setTimeout(()=>setOperationalState("listening",false),700); }
+      else { addMsg("Bridge error: "+safeText(result.error||"unknown"),"lexy"); pushTimeline("Hermes bridge error",safeText(result.state||"error"),"live"); setOperationalState(result.state||"error",true); }
+    }catch(err){ addMsg("Bridge request failed: "+safeText(err.message||err),"lexy"); pushTimeline("Hermes bridge request failed","plugin API","live"); setOperationalState("error",true); }
+    finally{ setChatBusy(false); }
+  });
+
+  function pushTimeline(tx,sub,cls){
+    const tl=$("timeline"); const d=new Date();
+    const ev=document.createElement("div"); ev.className="ev "+(cls||"");
+    ev.innerHTML='<div class="gut"><span class="td"></span></div><div class="tx">'+tx+'<small>'+sub+'</small></div><span class="tm">'+two(d.getHours())+":"+two(d.getMinutes())+'</span>';
+    tl.insertBefore(ev,tl.firstChild);
+    while(tl.children.length>6) tl.removeChild(tl.lastChild);
+  }
+  function renderApprovals(items){
+    const list=$("apprList"), count=$("apprCount"); if(!list||!count)return;
+    const pending=(items||[]).filter(x=>x.status==="pending");
+    count.textContent=pending.length?pending.length+" pending":"none";
+    if(!items||!items.length){ list.innerHTML='<div class="areq"><div class="q">No pending native approvals.</div><div class="sub">Hermes guards are standing by.</div></div>'; return; }
+    list.innerHTML="";
+    items.forEach(a=>{
+      const d=document.createElement("div"); d.className="areq"; d.dataset.id=a.id;
+      const disabled=a.status!=="pending"?" disabled":"";
+      d.innerHTML='<div class="q">'+esc(a.safe_summary||"Approval required")+'</div>' +
+        '<div class="sub">'+esc((a.request_type||"action")+" · "+(a.requesting_agent||"Hermes")+" · scope: "+(a.target_scope||"not disclosed")+" · risk: "+(a.risk_level||"unknown")+" · "+(a.status||"pending"))+'</div>' +
+        '<div class="sub"><code>'+esc(a.safe_command_preview||"native action")+'</code></div>' +
+        '<div class="acts"><button class="btn ok" data-act="approve"'+disabled+'>Approve</button><button class="btn no" data-act="deny"'+disabled+'>Deny</button></div>';
+      list.appendChild(d);
+    });
+  }
+  async function loadApprovals(){
+    try{ const data=await apiGet("/approvals"); if(data.ok){ renderApprovals(data.approvals||[]); if(data.state) setOperationalState(data.state,false); } }
+    catch(err){ pushTimeline("Approval refresh failed",safeText(err.message||err),"live"); }
+  }
+  $("apprList").addEventListener("click",async e=>{
+    const btn=e.target.closest(".btn"); if(!btn||btn.disabled)return;
+    const req=btn.closest(".areq"); if(!req||!req.dataset.id)return;
+    btn.disabled=true; setOperationalState("working",true);
+    try{
+      const act=btn.dataset.act==="deny"?"deny":"approve";
+      const result=await apiPost("/approvals/"+encodeURIComponent(req.dataset.id)+"/"+act,{});
+      if(result.ok){ pushTimeline("Native approval "+(act==="approve"?"approved":"denied"),safeText(result.status),"done"); }
+      else { addMsg("Approval error: "+safeText(result.error||"unknown"),"lexy"); pushTimeline("Approval resolution failed",safeText(result.error||"native"),"live"); }
+    }catch(err){ addMsg("Approval request failed: "+safeText(err.message||err),"lexy"); }
+    finally{ await loadApprovals(); }
+  });
+  setInterval(loadApprovals,2500);
+
+  /* ===== VOICE / PUSH-TO-TALK =============================================
+     Accent inherits var(--accent), so the mic tracks Lexy's live state hue.
+     States: idle · listening (hold) · processing (release) · muted.        */
+  const micPanel=$("micPanel"), micBtn=$("micBtn"), micMute=$("micMute"),
+        micLabel=$("micLabel"), micHelp=$("micHelp"), micCv=$("micwave"), mctx=micCv.getContext("2d");
+  let micState="idle", micAmp=0.12, micTarget=0.12, micHold=false, micProc=0, mediaRecorder=null, micStream=null, analyser=null, audioCtx=null, micMuted=false;
+  let micChunks=[], micLevels=null;
+  const micBars=new Array(30).fill(0);
+  function micSet(s){
+    if(s===micState) return; micState=s;
+    micPanel.classList.remove("is-idle","is-listening","is-processing","is-muted");
+    micPanel.classList.add("is-"+s);
+    if(s==="listening"){ micLabel.textContent="Listening…"; micHelp.textContent="Release to send"; micTarget=1; setOperationalState("listening",true); }
+    else if(s==="processing"){ micLabel.textContent="Processing"; micHelp.textContent="Transcribing…"; micTarget=0.5; setOperationalState("thinking",true); }
+    else if(s==="muted"){ micLabel.textContent="Muted"; micHelp.textContent="TTS muted · hold to talk still works"; micTarget=0.12; micMute.setAttribute("aria-pressed","true"); }
+    else { micLabel.textContent="Push to talk"; micHelp.innerHTML='Hold <kbd>Space</kbd> to speak'; micTarget=0.12; micMute.setAttribute("aria-pressed",micMuted?"true":"false"); }
+  }
+  async function ensureMic(){
+    if(micStream) return true;
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ addMsg("Browser microphone capture is unavailable.","lexy"); return false; }
+    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=audioCtx.createMediaStreamSource(micStream); analyser=audioCtx.createAnalyser(); analyser.fftSize=256; micLevels=new Uint8Array(analyser.frequencyBinCount); src.connect(analyser);
+    return true;
+  }
+  async function micStart(){ if(micHold||chatBusy) return; try{ if(!(await ensureMic())) return; micHold=true; micChunks=[]; clearTimeout(micProc); mediaRecorder=new MediaRecorder(micStream); mediaRecorder.ondataavailable=e=>{ if(e.data&&e.data.size) micChunks.push(e.data); }; mediaRecorder.onstop=sendVoice; mediaRecorder.start(); micSet("listening"); }catch(err){ addMsg("Microphone start failed: "+safeText(err.message||err),"lexy"); setOperationalState("error",true); } }
+  function micStop(){ if(!micHold) return; micHold=false; if(mediaRecorder&&mediaRecorder.state!=="inactive") mediaRecorder.stop(); micSet("processing"); }
+  async function sendVoice(){
+    try{
+      const blob=new Blob(micChunks,{type:(mediaRecorder&&mediaRecorder.mimeType)||"audio/webm"});
+      if(!blob.size){ micSet("idle"); return; }
+      setChatBusy(true);
+      const result=await apiPostRaw("/voice?muted="+(micMuted?"true":"false")+"&language=auto",blob);
+      if(result.transcript) addMsg(result.transcript,"me","voice-"+Date.now());
+      if(result.state) setOperationalState(result.state,true);
+      if(result.ok){ if(result.conversation) renderConversation(result.conversation); else addMsg(result.reply||result.response||"[empty response]","lexy"); pushTimeline("Voice turn returned","shared native session · "+safeText(result.session_id||"unknown"),"done"); if(result.tts&&result.tts.ok&&!micMuted){ const audio=new Audio("data:"+result.tts.mime+";base64,"+result.tts.audio_base64); audio.onplay=()=>setOperationalState("speaking",false); audio.onended=()=>setOperationalState("idle",false); audio.play().catch(()=>{}); } }
+      else { addMsg("Voice error: "+safeText(result.error||"unknown"),"lexy"); setOperationalState("error",true); }
+    }catch(err){ addMsg("Voice request failed: "+safeText(err.message||err),"lexy"); setOperationalState("error",true); }
+    finally{ setChatBusy(false); micSet("idle"); await loadApprovals(); }
+  }
+  micBtn.addEventListener("pointerdown",e=>{ e.preventDefault(); micStart(); });
+  addEventListener("pointerup",micStop);
+  micBtn.addEventListener("pointercancel",micStop);
+  micMute.addEventListener("click",()=>{ micMuted=!micMuted; micPanel.classList.toggle("is-muted",micMuted); micMute.setAttribute("aria-pressed",micMuted?"true":"false"); micLabel.textContent=micMuted?"TTS muted":"Push to talk"; });
+  const micTyping=()=>{ const a=document.activeElement; return a&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"); };
+  addEventListener("keydown",e=>{ if(e.code==="Space"&&!e.repeat&&!micTyping()){ e.preventDefault(); micStart(); } });
+  addEventListener("keyup",e=>{ if(e.code==="Space"&&!micTyping()){ e.preventDefault(); micStop(); } });
+  function micFrame(){
+    const cw=micCv.clientWidth;
+    if(cw>0){ const pw=Math.round(cw*DPR), ph=Math.round(26*DPR);
+      if(micCv.width!==pw) micCv.width=pw; if(micCv.height!==ph) micCv.height=ph; }
+    const w=micCv.width,h=micCv.height,mid=h/2; mctx.clearRect(0,0,w,h);
+    micAmp+=(micTarget-micAmp)*0.1;
+    const cs=getComputedStyle(document.documentElement);
+    const col=(micState==="muted"?cs.getPropertyValue("--danger"):cs.getPropertyValue("--accent")).trim()||"#7cc7ff";
+    const now=performance.now()/1000, n=micBars.length, gap=w/n;
+    mctx.strokeStyle=col; mctx.lineCap="round"; mctx.lineWidth=Math.max(2,DPR*1.8);
+    for(let i=0;i<n;i++){
+      const env=Math.sin(now*5+i*0.55)*0.5+0.5;
+      let live=0; if(analyser&&micLevels&&micState==="listening"){ analyser.getByteFrequencyData(micLevels); live=(micLevels[(i*3)%micLevels.length]||0)/255; }
+      const rnd=(micState==="listening"&&!reduce)?Math.max(live,Math.random()*0.18):(Math.sin(now*1.8+i*0.9)*0.5+0.5);
+      const tgt=micAmp*(0.28+0.72*env)*(micState==="listening"?(0.35+0.95*rnd):0.55);
+      micBars[i]+=(tgt-micBars[i])*0.3;
+      const bh=Math.max(DPR, micBars[i]*(h*0.46)), x=gap*i+gap*0.5;
+      mctx.globalAlpha=0.3+0.55*Math.min(1,micBars[i]*1.6);
+      mctx.beginPath(); mctx.moveTo(x,mid-bh); mctx.lineTo(x,mid+bh); mctx.stroke();
+    }
+    mctx.globalAlpha=1; requestAnimationFrame(micFrame);
+  }
+  requestAnimationFrame(micFrame);
+
+  /* ===== TELEMETRY ======================================================== */
+  let pulseEnv=0, pulseClock=0;
+  const syn={shown:STATES[0].syn};
+  const sparkData=new Array(40).fill(STATES[0].syn);
+  const spark=$("spark"), sctx=spark.getContext("2d");
+  function two(n){return String(n).padStart(2,"0");}
+  function drawSpark(){
+    const w=spark.width,h=spark.height; sctx.clearRect(0,0,w,h);
+    const max=Math.max.apply(null,sparkData)*1.1+1, min=Math.min.apply(null,sparkData)*0.9;
+    const acc=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#7cc7ff";
+    sctx.beginPath();
+    for(let i=0;i<sparkData.length;i++){
+      const x=i/(sparkData.length-1)*w, y=h-((sparkData[i]-min)/(max-min))*(h-4)-2;
+      i?sctx.lineTo(x,y):sctx.moveTo(x,y);
+    }
+    sctx.strokeStyle=acc; sctx.lineWidth=1.4; sctx.lineJoin="round"; sctx.shadowColor=acc; sctx.shadowBlur=6; sctx.stroke();
+    sctx.shadowBlur=0; sctx.lineTo(w,h); sctx.lineTo(0,h); sctx.closePath();
+    sctx.fillStyle="rgba(124,199,255,.08)"; sctx.fill();
+  }
+  setInterval(()=>{
+    const d=new Date(), clk=two(d.getHours())+":"+two(d.getMinutes())+":"+two(d.getSeconds());
+    $("m-clock").textContent=clk; $("tlClock").textContent="live "+clk.slice(0,5);
+    const jit=1+(Math.random()*2-1)*0.06*target.fire;
+    syn.shown=Math.round(lerp(syn.shown,target.syn*jit,.4));
+    $("m-syn").innerHTML=syn.shown.toLocaleString()+'<small>ops/s</small>';
+    const coh=(target.coh+(Math.random()*2-1)*0.25);
+    $("m-coh").textContent=coh.toFixed(1)+"%"; $("s-core").textContent=coh.toFixed(1)+"%";
+    $("m-cohbar").style.width=Math.max(4,Math.min(100,coh))+"%";
+    $("s-load").textContent=(0.2+target.fire*0.55+(Math.random()*0.08)).toFixed(2);
+    sparkData.push(syn.shown); sparkData.shift(); drawSpark();
+  },560);
+
+  setTimeout(()=>$("hint").classList.add("fade"),8000);
+
+  drawSpark();
+
+  /* ===== REAL READ-ONLY RUNTIME BINDINGS ================================== */
+  function statusColor(status){
+    const s=safeText(status).toLowerCase();
+    if(["ready","online","available","running","idle"].includes(s)) return "var(--success)";
+    if(["unknown","degraded","partial"].includes(s)) return "var(--warn)";
+    return "var(--meta)";
+  }
+  function setAgentRows(snapshot){
+    const navs=document.querySelectorAll(".rail .nav"); const list=navs[1]; if(!list) return;
+    const svc=snapshot.services||{}, hermes=snapshot.hermes||{}, model=snapshot.model||{};
+    const rows=[
+      ["Hermes Runtime", hermes.status || hermes.availability || "unknown", svc.hermes_cli?.status || "unknown"],
+      ["Provider", model.provider || "unknown", model.model || "unavailable"],
+      ["Gateway", svc.gateway?.status || "unknown", svc.gateway?.source || "cached probe"],
+      ["Memory / Vault", svc.memory_vault?.status || "unknown", svc.memory_vault?.path || "unavailable"],
+    ];
+    list.innerHTML=rows.map(r=>'<div class="agent"><span class="ad" style="color:'+statusColor(r[1])+'"></span><div><div class="nm">'+esc(r[0])+'</div><div class="rl">'+esc(r[2])+'</div></div><span class="st" style="color:'+statusColor(r[1])+'">'+esc(r[1])+'</span></div>').join("");
+  }
+  function setMemoryRows(snapshot){
+    const mem=document.querySelector("#panel-vault .mem"); if(!mem) return;
+    const svc=snapshot.services||{}, vh=snapshot.vault_health||{};
+    const notes=vh.notes||{};
+    const rows=[
+      ["Hermes OS Vault", svc.memory_vault?.status || "unknown", svc.memory_vault?.path || "unavailable"],
+      ["Mission Control Notes", notes.mission_control?.exists ? "available" : "unavailable", notes.mission_control?.size ? Math.round(notes.mission_control.size/1024)+"kb" : "unknown"],
+      ["Project Registry", notes.project_registry?.exists ? "available" : "unavailable", notes.project_registry?.size ? Math.round(notes.project_registry.size/1024)+"kb" : "unknown"],
+    ];
+    mem.innerHTML=rows.map(r=>'<a class="mrow" href="#"><span class="ic"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l5 3-5 3-5-3z"/><path d="M3 8l5 3 5-3"/></svg></span><div><div class="nm">'+esc(r[0])+'</div><div class="mt">'+esc(r[1])+'</div></div><span class="sz">'+esc(r[2])+'</span></a>').join("");
+    const meta=document.querySelector("#panel-vault .phead .meta");
+    if(meta) meta.textContent=svc.memory_vault?.status || "unknown";
+  }
+  function serviceRow(name, value, detail){
+    const color=statusColor(value);
+    return '<a class="mrow" href="#"><span class="ic" style="color:'+color+'"><svg viewBox="0 0 16 16" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.4a2.8 2.8 0 0 0-2.4 4.2L2.5 12.2l1.3 1.3 5.6-5.6a2.8 2.8 0 0 0 4.2-2.4l-1.8 1.8-1.6-1.6z"/></svg></span><div><div class="nm">'+esc(name)+'</div><div class="mt">'+esc(detail||"")+'</div></div><span class="sz">'+esc(value||"unknown")+'</span></a>';
+  }
+  function setToolsRows(snapshot){
+    const list=$("toolsList"); if(!list) return;
+    const svc=snapshot.services||{};
+    const rows=[
+      ["Plugin API", svc.plugin?.status, "Mission Control backend"],
+      ["Hermes CLI", svc.hermes_cli?.status, svc.hermes_cli?.path || "PATH probe"],
+      ["Gateway", svc.gateway?.status, svc.gateway?.source || "status probe"],
+      ["Whisper STT", svc.whisper?.status, svc.whisper?.command || (svc.whisper?.config_dir_exists ? "local config" : "missing")],
+      ["Piper TTS", svc.piper?.status, svc.piper?.command || (svc.piper?.config_dir_exists ? "local config" : "missing")],
+      ["Claude Code", svc.claude_code_cli?.status, svc.claude_code_cli?.path || "optional"],
+    ];
+    list.innerHTML=rows.map(r=>serviceRow(r[0], r[1]||"unknown", r[2])).join("");
+    const ok=rows.filter(r=>["online","available","running"].includes(String(r[1]||"").toLowerCase())).length;
+    const meta=$("toolsMeta"); if(meta) meta.textContent=ok+"/"+rows.length+" ready";
+  }
+  function setSystemRows(snapshot){
+    const list=$("systemList"); if(!list) return;
+    const hw=snapshot.hardware||{}, gpu=hw.gpu||{}, cpu=hw.cpu||{}, mem=hw.memory||{}, h=snapshot.health||{};
+    const rows=[
+      ["Runtime", snapshot.runtime_state || "unknown", snapshot.hermes?.status || snapshot.hermes?.availability || "Hermes"],
+      ["Dashboard", h.dashboard || "unknown", "localhost service"],
+      ["GPU", gpu.status || "unavailable", gpu.name || gpu.source || "nvidia-smi"],
+      ["CPU", cpu.status || "unavailable", typeof cpu.utilization_percent==="number" ? Math.round(cpu.utilization_percent)+"%" : cpu.source || "psutil"],
+      ["RAM", mem.status || "unavailable", typeof mem.utilization_percent==="number" ? Math.round(mem.utilization_percent)+"% used" : mem.source || "psutil"],
+    ];
+    list.innerHTML=rows.map(r=>serviceRow(r[0], r[1]||"unknown", r[2])).join("");
+    const meta=$("systemMeta"); if(meta) meta.textContent=snapshot.generated_at ? new Date(snapshot.generated_at*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "live";
+  }
+  function setTimeline(snapshot){
+    const tl=$("timeline"); if(!tl) return;
+    const h=snapshot.health||{}, tel=snapshot.telemetry||{}, active=snapshot.hermes?.active_task;
+    const rows=[
+      ["Runtime snapshot loaded", "plugin · read-only", "done", snapshot.generated_at],
+      [active ? safeText(active) : "No reliable active task", "Hermes active task", active ? "live" : "", null],
+      ["Gateway: "+safeText(h.gateway), "service availability", h.gateway==="running" ? "done" : "", null],
+      ["Last response: "+safeText(tel.last_response_at), "telemetry", tel.last_response_at ? "done" : "", null],
+    ];
+    tl.innerHTML=rows.map(r=>'<div class="ev '+esc(r[2])+'"><div class="gut"><span class="td"></span></div><div class="tx">'+esc(r[0])+'<small>'+esc(r[1])+'</small></div><span class="tm">'+(r[3]?new Date(r[3]*1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}):"--")+'</span></div>').join("");
+  }
+  function setApprovalsUnavailable(){
+    $("apprCount").textContent="not connected";
+    $("apprList").innerHTML='<div class="areq"><div class="q">Approval queue connection unavailable in Phase 2.</div><div class="sub">read-only runtime snapshot only · no approve/deny actions wired</div><div class="acts"><button class="btn ok" type="button">Approve</button><button class="btn no" type="button">Deny</button></div></div>';
+  }
+  function fmtPct(v){ return typeof v==="number" && isFinite(v) ? Math.round(v)+"%" : "Unavailable"; }
+  function fmtTemp(v){ return typeof v==="number" && isFinite(v) ? Math.round(v)+"°C" : "Unavailable"; }
+  function fmtMb(used,total){
+    if(typeof used!=="number" || typeof total!=="number" || !total) return "Unavailable";
+    const gb=n=>(n/1024).toFixed(n>=10240?0:1);
+    return gb(used)+"/"+gb(total)+"GB";
+  }
+  function fmtBytes(used,total,pct){
+    if(typeof used!=="number" || typeof total!=="number" || !total) return "Unavailable";
+    const gb=n=>(n/1073741824).toFixed(n>=10737418240?0:1);
+    const suffix=typeof pct==="number" ? " · "+Math.round(pct)+"%" : "";
+    return gb(used)+"/"+gb(total)+"GB"+suffix;
+  }
+  function levelClass(kind,v){
+    if(typeof v!=="number" || !isFinite(v)) return "";
+    if(kind==="temp") return v>=84 ? "danger" : v>=76 ? "warn" : "";
+    return v>=92 ? "danger" : v>=82 ? "warn" : "";
+  }
+  function setBar(id,pct,cls){
+    const el=$(id); if(!el) return;
+    el.style.width=Math.max(0,Math.min(100,Number(pct)||0))+"%";
+    el.className=cls||"";
+  }
+  function setVal(id,text,cls){
+    const el=$(id); if(!el) return;
+    el.textContent=text; el.classList.remove("warn","danger"); if(cls) el.classList.add(cls);
+  }
+  function applyHardwareTelemetry(payload){
+    const hw=(payload&&payload.hardware)||{}, gpu=hw.gpu||{}, cpu=hw.cpu||{}, mem=hw.memory||{};
+    const gpuPct=typeof gpu.utilization_percent==="number" ? gpu.utilization_percent : null;
+    const vramPct=(typeof gpu.vram_used_mb==="number" && typeof gpu.vram_total_mb==="number" && gpu.vram_total_mb>0) ? gpu.vram_used_mb/gpu.vram_total_mb*100 : null;
+    const cpuPct=typeof cpu.utilization_percent==="number" ? cpu.utilization_percent : null;
+    const ramPct=typeof mem.utilization_percent==="number" ? mem.utilization_percent : null;
+    setVal("hw-gpu", gpu.status==="available" ? fmtPct(gpuPct)+(gpu.name ? " · "+gpu.name.replace(/^NVIDIA\s+/i,"") : "") : "Unavailable", levelClass("util",gpuPct));
+    setVal("hw-gpu-temp", gpu.status==="available" ? fmtTemp(gpu.temperature_c) : "Unavailable", levelClass("temp",gpu.temperature_c));
+    setVal("hw-vram", fmtMb(gpu.vram_used_mb,gpu.vram_total_mb), levelClass("util",vramPct));
+    setVal("hw-cpu", cpu.status==="available" ? fmtPct(cpuPct)+(cpu.frequency_mhz ? " · "+Math.round(cpu.frequency_mhz)+"MHz" : "") : "Unavailable", levelClass("util",cpuPct));
+    setVal("hw-ram", mem.status==="available" ? fmtBytes(mem.used_bytes,mem.total_bytes,ramPct) : "Unavailable", levelClass("util",ramPct));
+    setBar("hw-gpu-bar",gpuPct,levelClass("util",gpuPct));
+    setBar("hw-vram-bar",vramPct,levelClass("util",vramPct));
+    setBar("hw-cpu-bar",cpuPct,levelClass("util",cpuPct));
+    setBar("hw-ram-bar",ramPct,levelClass("util",ramPct));
+  }
+  function markHardwareUnavailable(){
+    ["hw-gpu","hw-gpu-temp","hw-vram","hw-cpu","hw-ram"].forEach(id=>setVal(id,"Unavailable",""));
+    ["hw-gpu-bar","hw-vram-bar","hw-cpu-bar","hw-ram-bar"].forEach(id=>setBar(id,0,""));
+  }
+  async function refreshHardware(){
+    try{ applyHardwareTelemetry(await apiGet("/runtime")); }
+    catch(_err){ markHardwareUnavailable(); }
+  }
+  function applyRuntimeSnapshot(snapshot){
+    const runtime=snapshot.runtime_state || "unknown", h=snapshot.health||{}, model=snapshot.model||{};
+    $("s-state-top").textContent=runtime.toUpperCase();
+    $("m-state").textContent=runtime.charAt(0).toUpperCase()+runtime.slice(1);
+    $("s-core").textContent=snapshot.hermes?.status || "unknown";
+    $("s-load").textContent=model.provider ? model.provider : "unknown";
+    setAgentRows(snapshot); setMemoryRows(snapshot); setToolsRows(snapshot); setSystemRows(snapshot); setTimeline(snapshot);
+    const voice=snapshot.voice_status||{}, wh=h.whisper || snapshot.services?.whisper?.status || "unknown", pp=h.piper || snapshot.services?.piper?.status || "unknown";
+    const voiceReady = (wh==="available" || wh==="online") && (pp==="available" || pp==="online");
+    if(!micHold && micState!=="processing"){
+      $("micLabel").textContent=voiceReady ? "Push to talk" : "Voice partial";
+      $("micHelp").innerHTML=voiceReady ? 'Hold <kbd>Space</kbd> to speak' : "Whisper: "+safeText(wh)+" · Piper: "+safeText(pp);
+    }
+    if(runtime==="offline" || h.plugin==="offline") setState(4,false); else if(!micHold && !chatBusy) setState(0,false);
+  }
+  async function refreshRuntime(){
+    try{ applyRuntimeSnapshot(await apiGet("/snapshot")); }
+    catch(err){ addMsg("Runtime snapshot unavailable: "+esc(err.message || err),"lexy"); pushTimeline("Runtime snapshot failed","plugin API · read-only","live"); setState(4,false); }
+  }
+  refreshRuntime(); refreshHardware(); loadConversation(); loadApprovals(); setInterval(refreshRuntime, 30000); setInterval(refreshHardware, 2000);
+
+  /* ===== LEFT SIDEBAR NAVIGATION ========================================== */
+  function focusPanel(panel){
+    const nav = document.querySelector('.rail .nav');
+    if(nav) nav.querySelectorAll('a[data-panel]').forEach(a=>a.classList.toggle('on', a.dataset.panel===panel));
+    const map = {overview:'panel-chat', mission:'panel-mission', agents:null, vault:'panel-vault', approvals:'panel-approvals', tools:'panel-tools', system:'panel-system'};
+    if(panel==='agents'){
+      pushTimeline('Agents panel focused','live service rows refreshed from runtime snapshot','done');
+      setOperationalState('thinking', true); refreshRuntime(); return;
+    }
+    if(panel==='system'){
+      pushTimeline('System telemetry focused','hardware/runtime refresh requested','done');
+      refreshHardware(); refreshRuntime(); setOperationalState('thinking', true);
+    }
+    const id = map[panel] || 'panel-chat';
+    const el = $(id);
+    if(el){ el.scrollIntoView({block:'nearest', behavior: reduce ? 'auto' : 'smooth'}); el.animate([{boxShadow:'0 0 0 0 var(--accent)'},{boxShadow:'0 0 24px -8px var(--accent)'},{boxShadow:'0 0 0 0 var(--accent)'}], {duration:900}); }
+    if(panel==='approvals') loadApprovals();
+    if(panel==='vault' || panel==='mission') refreshRuntime();
+  }
+  document.querySelectorAll('.rail .nav a[data-panel]').forEach(a=>a.addEventListener('click', e=>{ e.preventDefault(); focusPanel(a.dataset.panel); lastInteract=performance.now(); }));
+
+  /* keyboard: 1–5 switch states */
+  addEventListener("keydown",e=>{ const n=parseInt(e.key,10); if(n>=1&&n<=STATES.length) setState(n-1,true); });
+})();
+</script>
+</body>
+</html>

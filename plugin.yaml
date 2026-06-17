@@ -1,0 +1,7 @@
+name: hermes-os-mission-control
+version: 0.7.0
+description: Mission Control OS dashboard plugin for Hermes Agent.
+author: Ashki + Lexy
+kind: standalone
+provides_hooks: []
+provides_tools: []

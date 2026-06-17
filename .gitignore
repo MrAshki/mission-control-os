@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node/build scratch
+node_modules/
+.cache/
+.vite/
+dist-temp/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local Hermes/private state
+state/
+*.log
+.env
+.env.*

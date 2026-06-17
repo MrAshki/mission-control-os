@@ -1,0 +1,14 @@
+{
+  "name": "hermes-os-mission-control",
+  "label": "Mission Control",
+  "description": "Hermes OS Mission Control with in-process Hermes-native session, voice, and approval bridge.",
+  "icon": "Radar",
+  "version": "0.7.0",
+  "tab": {
+    "path": "/mission-control",
+    "position": "after:memory"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
