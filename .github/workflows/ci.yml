@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  quality:
+    name: python sanity checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python files
+        run: python -m compileall .
+
+      - name: Validate plugin manifests
+        run: |
+          python -m json.tool dashboard/manifest.json > /dev/null
+          python -m json.tool src/plugin/manifest.json > /dev/null
+
+      - name: Run tests if present
+        shell: bash
+        run: |
+          if [ -d tests ]; then
+            python -m pip install --upgrade pip pytest
+            pytest -q
+          fi
