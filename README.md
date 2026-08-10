@@ -77,6 +77,15 @@ src/frontend/index.html     # Source single-file Mission Control UI
 src/plugin/                 # Source copy of plugin backend/manifest
 ```
 
+## Running the tests
+
+Smoke tests for the plugin API live in `tests/`. They run without a live Hermes installation: local runtime discovery is mocked and all filesystem access is redirected to temporary directories.
+
+```powershell
+pip install fastapi httpx pytest
+python -m pytest tests
+```
+
 ## Safety notes
 
 Mission Control is intended as a local cockpit for your own Hermes installation. Do not expose your Hermes dashboard publicly without authentication. File/config/install/delete/external-send actions should remain protected by Hermes approvals.
